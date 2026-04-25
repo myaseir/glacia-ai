@@ -1,134 +1,147 @@
-import Hero from "./components/Hero";
-import Link from "next/link";
+"use client";
 
-export default function Home() {
+import { useState, useRef, useEffect } from "react";
+
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
+
+export default function GlaciaAssistant() {
+  const [status, setStatus] = useState<"idle" | "listening" | "processing" | "speaking">("idle");
+  const [transcript, setTranscript] = useState("");
+  
+  // Refs for managing side effects without re-renders
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const recognitionRef = useRef<any>(null);
+
+  const startAssistant = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+
+    recognition.lang = "en-US";
+    recognition.continuous = false; 
+    recognition.interimResults = true; // Essential for fast interruption
+
+    recognition.onstart = () => setStatus("listening");
+
+    // --- INTERRUPTION LOGIC ---
+    recognition.onspeechstart = () => {
+      if (audioRef.current && !audioRef.current.paused) {
+        console.log("User interrupted AI. Stopping playback.");
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+        setStatus("listening");
+      }
+    };
+
+    recognition.onresult = async (event: any) => {
+      const isFinal = event.results[0].isFinal;
+      const text = event.results[0][0].transcript;
+      setTranscript(text);
+
+      if (isFinal) {
+        recognition.stop(); // Stop mic while processing
+        setStatus("processing");
+
+        try {
+          const response = await fetch("https://glacialabs.app.n8n.cloud/webhook/glacia-assistant", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+              chatInput: text, 
+              sessionId: "glacia_barge_in_session" 
+            }),
+          });
+
+          if (!response.ok) throw new Error("n8n error");
+
+          const audioBlob = await response.blob();
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
+          audioRef.current = audio;
+
+          setStatus("speaking");
+          await audio.play();
+
+          audio.onended = () => {
+            URL.revokeObjectURL(audioUrl);
+            audioRef.current = null;
+            // Loop back to listen automatically
+            startAssistant(); 
+          };
+
+          // To allow interruption while the AI is speaking, 
+          // we need to keep the mic listening in the background
+          recognition.start();
+
+        } catch (error) {
+          console.error("Loop Error:", error);
+          setStatus("idle");
+        }
+      }
+    };
+
+    recognition.onerror = (e: any) => {
+      if (e.error === 'not-allowed') setStatus("idle");
+      // Silently restart on timeout errors to keep conversation alive
+      if (e.error === 'no-speech') startAssistant(); 
+    };
+
+    recognition.start();
+  };
+
   return (
-    <main className="min-h-screen bg-white">
-      <Hero />
-      
-      {/* 1. Philosophy Section: The "Numra" Statement */}
-      <section className="py-24 md:py-40 px-6 max-w-5xl mx-auto">
-        <div className="flex flex-col items-center text-center">
-          <div className="w-px h-16 bg-rose-900/30 mb-10"></div>
-          <h4 className="text-rose-900 text-[10px] md:text-xs tracking-[0.5em] font-bold uppercase mb-8">
-            The Philosophy
-          </h4>
-          <h2 className="text-4xl md:text-7xl font-serif text-zinc-900 mb-10 italic tracking-tighter leading-tight">
-            Defined by Panache. <br/> 
-            Refined by Artistry.
-          </h2>
-          <p className="text-zinc-500 text-lg md:text-xl font-light leading-relaxed max-w-3xl mx-auto italic">
-            "We focus on enhancing the most unique features of your face, creating perfect harmony between colour and tone. 
-            Our definitive finishing will give you the individuality you desire and let you stand out from the crowd."
+    <main className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center px-6">
+      <div className="max-w-md w-full text-center space-y-12">
+        
+        <div className="space-y-4">
+          <h1 className="text-white text-xs tracking-[0.6em] uppercase font-bold opacity-70">
+            Glacia Labs
+          </h1>
+          <p className="text-zinc-500 font-serif italic text-xl h-8">
+            {status === "listening" ? "I'm listening..." : 
+             status === "processing" ? "Thinking..." : 
+             status === "speaking" ? "Speaking (Talk to interrupt)" : 
+             "Tap to start conversation"}
           </p>
         </div>
-      </section>
 
-      {/* 2. Services: Editorial Alternating Layout */}
-      <section className="pb-32 px-6 md:px-12 max-w-7xl mx-auto space-y-32 md:space-y-48">
-        
-        {/* Category 01: Makeup */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-24 items-center">
-          <div className="order-2 md:order-1 flex flex-col items-start">
-            <span className="text-zinc-300 text-5xl md:text-7xl font-serif mb-6 opacity-50">01</span>
-            <h3 className="text-3xl md:text-5xl font-serif mb-6 italic text-zinc-900">The Makeup Suite</h3>
-            <p className="text-zinc-500 font-light leading-loose mb-8 text-base md:text-lg">
-              Bridal, party, editorial, and private lessons tailored to your specific occasion. Fulfilling your beauty needs with great panache.
-            </p>
-            <ul className="grid grid-cols-1 gap-4 text-[11px] tracking-[0.3em] uppercase text-rose-900 font-semibold mb-10">
-              <li className="flex items-center gap-3">
-                <span className="w-1.5 h-[1px] bg-rose-900"></span> Bridal Masterclass
-              </li>
-              <li className="flex items-center gap-3">
-                <span className="w-1.5 h-[1px] bg-rose-900"></span> Editorial & Headshots
-              </li>
-              <li className="flex items-center gap-3">
-                <span className="w-1.5 h-[1px] bg-rose-900"></span> Private Makeovers
-              </li>
-            </ul>
-            <Link href="/bridal" className="text-zinc-900 text-[10px] tracking-[0.4em] uppercase font-bold border-b border-zinc-900 pb-1 hover:text-rose-800 hover:border-rose-800 transition-all">
-              View Portfolio
-            </Link>
-          </div>
-          <div className="order-1 md:order-2 aspect-[4/5] overflow-hidden bg-zinc-100 shadow-2xl group">
-            <img 
-              src="https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?q=80&w=1200" 
-              alt="Makeup Artistry" 
-              className="object-cover w-full h-full grayscale group-hover:grayscale-0 transition-all duration-1000 scale-100 group-hover:scale-105" 
-            />
-          </div>
+        <div className="relative flex items-center justify-center">
+          {/* Pulse animation for different states */}
+          {status !== "idle" && (
+            <div className={`absolute inset-0 rounded-full animate-ping opacity-20 ${
+              status === "listening" ? "bg-rose-500" : "bg-emerald-500"
+            }`}></div>
+          )}
+
+          <button
+            onClick={startAssistant}
+            className={`relative z-10 w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 border ${
+              status === "listening" ? "bg-rose-900 border-rose-700 scale-110" :
+              status === "speaking" ? "bg-zinc-800 border-emerald-900" :
+              "bg-zinc-900 border-zinc-800"
+            }`}
+          >
+            <div className={`flex gap-1 items-end h-6 ${status === "idle" ? "opacity-30" : "opacity-100"}`}>
+              <span className={`w-1 bg-white ${status === 'listening' ? 'animate-[bounce_0.8s_infinite]' : 'h-2'}`}></span>
+              <span className={`w-1 bg-white ${status === 'listening' ? 'animate-[bounce_1s_infinite]' : 'h-4'}`}></span>
+              <span className={`w-1 bg-white ${status === 'listening' ? 'animate-[bounce_1.2s_infinite]' : 'h-3'}`}></span>
+            </div>
+          </button>
         </div>
 
-        {/* Category 02: Hair */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-24 items-center">
-          <div className="aspect-[4/5] overflow-hidden bg-zinc-100 shadow-2xl group">
-            <img 
-              src="https://images.unsplash.com/photo-1562322140-8baeececf3df?q=80&w=1200" 
-              alt="Hair Artistry" 
-              className="object-cover w-full h-full grayscale group-hover:grayscale-0 transition-all duration-1000 scale-100 group-hover:scale-105" 
-            />
-          </div>
-          <div className="flex flex-col items-start">
-            <span className="text-zinc-300 text-5xl md:text-7xl font-serif mb-6 opacity-50">02</span>
-            <h3 className="text-3xl md:text-5xl font-serif mb-6 italic text-zinc-900">Hair Artistry</h3>
-            <p className="text-zinc-500 font-light leading-loose mb-8 text-base md:text-lg">
-              From precision cuts to bespoke colour and styling treatments. We create perfect harmony between your style and our definitive finish.
-            </p>
-            <ul className="grid grid-cols-1 gap-4 text-[11px] tracking-[0.3em] uppercase text-rose-900 font-semibold mb-10">
-              <li className="flex items-center gap-3">
-                <span className="w-1.5 h-[1px] bg-rose-900"></span> Couture Styling
-              </li>
-              <li className="flex items-center gap-3">
-                <span className="w-1.5 h-[1px] bg-rose-900"></span> Technical Colour
-              </li>
-              <li className="flex items-center gap-3">
-                <span className="w-1.5 h-[1px] bg-rose-900"></span> Luxury Treatments
-              </li>
-            </ul>
-          </div>
+        <div className="min-h-[80px]">
+          <p className="text-zinc-400 text-sm font-light italic leading-relaxed">
+            {transcript ? `"${transcript}"` : "Active conversation mode."}
+          </p>
         </div>
-
-        {/* Category 03: Skin */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-24 items-center">
-          <div className="order-2 md:order-1 flex flex-col items-start">
-            <span className="text-zinc-300 text-5xl md:text-7xl font-serif mb-6 opacity-50">03</span>
-            <h3 className="text-3xl md:text-5xl font-serif mb-6 italic text-zinc-900">Skin & Essentials</h3>
-            <p className="text-zinc-500 font-light leading-loose mb-8 text-base md:text-lg">
-              Rejuvenating facials and grooming performed with meticulous attention to detail, ensuring your natural beauty shines through.
-            </p>
-            <ul className="grid grid-cols-1 gap-4 text-[11px] tracking-[0.3em] uppercase text-rose-900 font-semibold mb-10">
-              <li className="flex items-center gap-3">
-                <span className="w-1.5 h-[1px] bg-rose-900"></span> Signature Facials
-              </li>
-              <li className="flex items-center gap-3">
-                <span className="w-1.5 h-[1px] bg-rose-900"></span> Luxury Manicure
-              </li>
-              <li className="flex items-center gap-3">
-                <span className="w-1.5 h-[1px] bg-rose-900"></span> Precision Waxing
-              </li>
-            </ul>
-          </div>
-          <div className="order-1 md:order-2 aspect-[4/5] overflow-hidden bg-zinc-100 shadow-2xl group">
-            <img 
-              src="https://images.unsplash.com/photo-1698681296890-a772cdec87f8?q=80&w=386&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D" 
-              alt="Skin Care" 
-              className="object-cover w-full h-full grayscale group-hover:grayscale-0 transition-all duration-1000 scale-100 group-hover:scale-105" 
-            />
-          </div>
-        </div>
-
-      </section>
-
-      {/* 3. Global CTA */}
-      <section className="bg-zinc-50 py-32 px-6 text-center border-t border-zinc-100">
-        <h2 className="text-3xl md:text-5xl font-serif text-zinc-900 mb-10 italic">Begin Your Transformation</h2>
-        <Link 
-          href="/contact"
-          className="inline-block px-14 py-5 bg-zinc-900 text-white text-[11px] tracking-[0.4em] uppercase font-bold hover:bg-rose-900 transition-all duration-500 shadow-2xl"
-        >
-          Book An Appointment
-        </Link>
-      </section>
+      </div>
     </main>
   );
 }
